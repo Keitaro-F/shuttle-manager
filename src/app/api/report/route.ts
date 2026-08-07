@@ -1,20 +1,38 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
+import { parseReportInput } from "@/lib/report-input"
 
 export async function POST(req: NextRequest) {
-    try {
-        const data = await req.json()
-        const report = await prisma.report.create({
-            data: data
-        })
-        console.log(report)
+  let body: unknown
 
-        return NextResponse.json(report)
+  try {
+    body = await req.json()
+  } catch {
+    return NextResponse.json(
+      { message: "JSONの形式が正しくありません" },
+      { status: 400 }
+    )
+  }
 
+  const data = parseReportInput(body)
 
-    } catch (error) {
-        console.error(error)
-    }
+  if (!data) {
+    return NextResponse.json(
+        { message: "入力内容が正しくありません" },
+        { status: 400 }
+    )
+  }
+
+  try {
+    const report = await prisma.report.create({ data })
+
+    return NextResponse.json(report, { status: 201 })
+  } catch (error) {
+    console.error("Failed to create report:", error)
+
+    return NextResponse.json(
+      { message: "報告の登録に失敗しました" },
+      { status: 500 }
+    )
+  }
 }
-
-

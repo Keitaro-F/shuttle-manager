@@ -22,6 +22,11 @@ export default async function HistoryPage({searchParams}: Props) {
     return (
     <div className="flex flex-col gap-5 m-5">
         <h1 className="text-3xl font-bold">履歴ページ</h1>
+
+        <div>
+            <Link href="/"><Button variant="outline">ホームへ戻る</Button></Link>
+        </div>
+        
         <div>
             <Link href="/history">
                 <Button variant="outline">全て</Button>
@@ -42,10 +47,6 @@ export default async function HistoryPage({searchParams}: Props) {
                     </Link>
                 </div>
             ))}
-        </div>
-
-        <div>
-            <Link href="/"><Button variant="outline">ホームへ戻る</Button></Link>
         </div>
 
     </div>

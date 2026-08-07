@@ -27,21 +27,42 @@ export default function ReportPage() {
     const [location, setLocation] = useState("豊中")
     const [newCount, setNewCount] = useState("")
     const [semiCount, setSemiCount] = useState("")
+    const [submitting, setSubmitting] = useState(false)
+    const [error, setError] = useState("")
 
     const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault()
-        const res = await fetch("/api/report", {
-            method: "POST",
-            body: JSON.stringify({
-                location,
-                newCount: Number(newCount),
-                semiCount: Number(semiCount)
+        setSubmitting(true)
+        setError("")
+
+        try {
+            const res = await fetch("/api/report", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                    location,
+                    newCount: Number(newCount),
+                    semiCount: Number(semiCount),
+                }),
             })
-        })
 
-        router.push("/")
+            const result = await res.json().catch(() => null)
 
+            if (!res.ok) {
+            throw new Error(result?.message ?? "登録に失敗しました")
+            }
 
+            router.push("/")
+            router.refresh()
+        } catch (error) {
+            setError(
+                error instanceof Error ? error.message : "登録に失敗しました"
+            )
+        } finally {
+            setSubmitting(false)
+        }
     }
 
   return(
@@ -50,6 +71,14 @@ export default function ReportPage() {
         <FieldSet>
             <FieldLegend>シャトル報告フォーム</FieldLegend>
             <FieldDescription>間違いのないよう入力してください</FieldDescription>
+            {error && (
+                <div
+                    role="alert"
+                    className="rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-700"
+                >
+                    {error}
+                </div>
+            )}
             <FieldGroup>
                 <Field>
                     <FieldLabel>
@@ -106,10 +135,12 @@ export default function ReportPage() {
                     </FieldDescription>
                 </Field>
                 <Field>
-                    <Button type="submit">提出</Button>
+                    <Button type="submit" disabled={submitting}>
+                        {submitting ? "送信中..." : "提出"}
+                    </Button>
                 </Field>
                 <Field>
-                    <Button variant="outline" onClick={()=>router.push("/")}>
+                    <Button type="button" variant="outline" onClick={()=>router.push("/")}>
                         ホームに戻る
                     </Button>
                 </Field>
