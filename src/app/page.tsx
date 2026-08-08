@@ -10,7 +10,10 @@ export default async function Home() {
     locations.map((location) => {
         return prisma.report.findFirst({
             where: {location},
-            orderBy: { createdAt: "desc"}
+            orderBy: [
+              { reportedAt: "desc" },
+              { createdAt: "desc" },
+            ]
         })
     })
   )

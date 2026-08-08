@@ -20,9 +20,9 @@
 | --- | --- |
 | リポジトリ | `/Users/user/dev/shuttle-manager` |
 | 作業ブランチ | `feature/line-integration` |
-| 現在地 | フェーズ1完了、フェーズ2着手前 |
-| 次の作業 | PostgreSQL移行方針とLINE連携用データモデルの実装 |
-| 既存DB | SQLite。既存データの移行・保存は不要 |
+| 現在地 | フェーズ2完了、フェーズ3着手前 |
+| 次の作業 | フェーズ3：メッセージ解析・Report保存処理（今回は未着手） |
+| 既存DB | Neon PostgreSQL（開発用）。既存SQLiteデータは移行していない |
 | LINEメッセージ訂正 | 編集機能には依存せず、送信取消・再送またはWeb編集を利用 |
 
 ## 3. 進行ルール
@@ -43,8 +43,8 @@
 | フェーズ | 内容 | 状態 | 目安 |
 | --- | --- | --- | ---: |
 | 1 | 調査・MVP仕様・実装計画 | 完了 | 完了済み |
-| 2 | PostgreSQL・Prismaデータモデル | 未着手（次） | 3〜6時間 |
-| 3 | メッセージ解析・Report保存処理 | 未着手 | 3〜5時間 |
+| 2 | PostgreSQL・Prismaデータモデル | 完了 | 3〜6時間 |
+| 3 | メッセージ解析・Report保存処理 | 未着手（次フェーズ） | 3〜5時間 |
 | 4 | LINE公式アカウント・Webhook準備 | 未着手 | 1〜3時間 |
 | 5 | Webhook受信・署名・グループ制限 | 未着手 | 4〜7時間 |
 | 6 | LINE返信・残量確認・送信取消 | 未着手 | 3〜5時間 |
@@ -104,11 +104,23 @@
 
 ### フェーズ2：PostgreSQL・Prismaデータモデル
 
-状態：**未着手（次に実施）**
+状態：**完了**
 
 目的：
 
 外部公開環境でLINE Webhookから永続的にデータを保存できるDB基盤を作る。
+
+PostgreSQL移行方針：
+
+- マネージドPostgreSQLにはNeonを使用する
+- アプリ実行時は `DATABASE_URL`、migration実行時は `DIRECT_URL` を使用する
+- Neonではアプリ用にpooled接続、migration用にdirect接続を設定する
+- 開発用DBは本番用とは別のNeon projectまたはbranchとして作成する
+- 開発用Neon projectは `shuttle-manager-dev`（PostgreSQL 17、Singapore）を使用する
+- Neon Authは使用しない
+- 既存SQLiteデータは移行しない
+- 既存SQLite migrationは `prisma/migrations/` に保存したまま残す
+- PostgreSQL migrationは `prisma/migrations-postgresql/` で新しく管理する
 
 実装内容：
 
@@ -145,13 +157,14 @@ src/app/api/report/[id]/route.ts
 
 完了条件：
 
-- [ ] PostgreSQLへ接続できる
-- [ ] PostgreSQL用migrationが適用できる
-- [ ] LINE連携用モデルがPrisma schemaに存在する
-- [ ] 空DBでWebフォームからReportを登録できる
-- [ ] ホームと履歴画面でReportを確認できる
-- [ ] Web編集機能が引き続き動作する
-- [ ] 型チェック、Lint、production buildが成功する
+- [x] ローカルPostgreSQLへ接続できる
+- [x] Neonの開発DBへ接続できる
+- [x] PostgreSQL用migrationが適用できる
+- [x] LINE連携用モデルがPrisma schemaに存在する
+- [x] 空DBでWebフォームからReportを登録できる
+- [x] ホームと履歴画面でReportを確認できる
+- [x] Web編集機能が引き続き動作する
+- [x] 型チェック、Lint、production buildが成功する
 
 ### フェーズ3：メッセージ解析・Report保存処理
 
@@ -369,9 +382,9 @@ LINEだけで登録結果の確認と誤報告の取消ができる状態を作�
 ```text
 [完了] フェーズ1：調査・MVP仕様・実装計画
    ↓
-[次]   フェーズ2：PostgreSQL・Prismaデータモデル
+[完了] フェーズ2：PostgreSQL・Prismaデータモデル
    ↓
-[待機] フェーズ3：メッセージ解析・Report保存処理
+[次]   フェーズ3：メッセージ解析・Report保存処理（未着手）
    ↓
 [待機] フェーズ4：LINE公式アカウント・Webhook準備
    ↓
@@ -384,10 +397,10 @@ LINEだけで登録結果の確認と誤報告の取消ができる状態を作�
 
 ## 8. 次のCodexタスクに渡す指示
 
-フェーズ2の新しいタスクでは、次のプロンプトを使用する。
+フェーズ3の新しいタスクでは、次のプロンプトを使用する。
 
 ```text
-/Users/user/dev/shuttle-manager を対象に、LINE連携のフェーズ2だけを進めてください。
+/Users/user/dev/shuttle-manager を対象に、LINE連携のフェーズ3だけを進めてください。
 
 最初に以下を読んでください。
 - AGENTS.md
@@ -397,15 +410,13 @@ LINEだけで登録結果の確認と誤報告の取消ができる状態を作�
 現在のブランチとGit状態を確認してください。
 
 今回の対象：
-- PostgreSQL移行方針の確定
-- PostgreSQL用Prisma schemaとmigration
-- ReportSource、LINE連携用Reportフィールド、WebhookReceipt
-- reportedAt基準への変更
+- メッセージ解析処理と単体テスト
+- Web・LINE共通のReport保存処理
+- 既存Web APIの共通保存処理への移行
 - 既存Web機能の回帰確認
 
-既存SQLiteデータの移行は不要です。
-LINE Webhook、メッセージ解析、LINE返信にはまだ着手しないでください。
-SQLite migrationやDBファイルを削除・移動する前に対象を確認してください。
+フェーズ2で作成したPostgreSQL schemaとmigrationを前提にしてください。
+LINE Webhook、署名検証、LINE返信、LINE Developers Consoleの設定にはまだ着手しないでください。
 
 実装後にLint、TypeScript型チェック、必要なDB確認、production buildを実行してください。
 コミットはせず、変更内容と検証結果を報告してください。
@@ -438,4 +449,6 @@ npm run build
 | 2026-08-07 | LINEメッセージ編集機能には依存しない |
 | 2026-08-07 | 誤報告は送信取消・再送、またはWeb履歴から修正する |
 | 2026-08-07 | 既存SQLiteデータはPostgreSQLへ移行しない |
+| 2026-08-07 | マネージドPostgreSQLにはNeonを使用する |
+| 2026-08-07 | SQLite migrationを保持し、PostgreSQL migrationを別ディレクトリで管理する |
 | 2026-08-07 | MVP完成前に購入管理とグラフを実装しない |

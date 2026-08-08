@@ -9,15 +9,34 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
-model Report {
-  id String @id @default(cuid())
-  location String
-  newCount Float
-  semiCount Float
+enum ReportSource {
+  WEB
+  LINE
+}
 
-  createdAt DateTime @default(now())
+model Report {
+  id              String       @id @default(cuid())
+  location        String
+  newCount        Float
+  semiCount       Float
+  reportedAt      DateTime     @default(now())
+  source          ReportSource @default(WEB)
+  lineMessageId   String?      @unique
+  lineGroupId     String?
+  lineUserId      String?
+  originalMessage String?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  @@index([location, reportedAt(sort: Desc)])
+  @@index([reportedAt(sort: Desc)])
+}
+
+model WebhookReceipt {
+  webhookEventId String   @id
+  processedAt    DateTime @default(now())
 }

@@ -15,9 +15,10 @@ export default async function HistoryPage({searchParams}: Props) {
         where: location
         ? { location}
         : undefined,
-        orderBy: {
-            createdAt: "desc"
-        }
+        orderBy: [
+            { reportedAt: "desc" },
+            { createdAt: "desc" },
+        ]
     })
     return (
     <div className="flex flex-col gap-5 m-5">
@@ -41,7 +42,7 @@ export default async function HistoryPage({searchParams}: Props) {
                     <p>拠点: {report.location}</p>
                     <p>ニュー: {report.newCount}</p>
                     <p>セミ: {report.semiCount}</p>
-                    <p>日時: {report.createdAt.toLocaleString()}</p>
+                    <p>日時: {report.reportedAt.toLocaleString()}</p>
                     <Link href={`/history/${report.id}/edit`}>
                         <Button variant="outline">編集</Button>
                     </Link>
