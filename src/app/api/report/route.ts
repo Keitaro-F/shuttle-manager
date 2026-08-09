@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
-import { prisma } from "@/lib/prisma"
 import { parseReportInput } from "@/lib/report-input"
+import { createReport, ReportSource } from "@/lib/report-service"
 
 export async function POST(req: NextRequest) {
   let body: unknown
@@ -24,7 +24,10 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const report = await prisma.report.create({ data })
+    const { report } = await createReport({
+      ...data,
+      source: ReportSource.WEB,
+    })
 
     return NextResponse.json(report, { status: 201 })
   } catch (error) {

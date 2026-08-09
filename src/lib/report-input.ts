@@ -6,6 +6,15 @@ export type ReportInput = {
   semiCount: number
 }
 
+export function isValidReportCount(value: unknown): value is number {
+  return (
+    typeof value === "number" &&
+    Number.isFinite(value) &&
+    value >= 0 &&
+    Number.isInteger(value * 2)
+  )
+}
+
 export function parseReportInput(value: unknown): ReportInput | null {
   if (typeof value !== "object" || value === null) {
     return null
@@ -21,21 +30,11 @@ export function parseReportInput(value: unknown): ReportInput | null {
     return null
   }
 
-  if (
-    typeof newCount !== "number" ||
-    !Number.isFinite(newCount) ||
-    newCount < 0 ||
-    !Number.isInteger(newCount * 2)
-  ) {
+  if (!isValidReportCount(newCount)) {
     return null
   }
 
-  if (
-    typeof semiCount !== "number" ||
-    !Number.isFinite(semiCount) ||
-    semiCount < 0 ||
-    !Number.isInteger(semiCount * 2)
-  ) {
+  if (!isValidReportCount(semiCount)) {
     return null
   }
 
