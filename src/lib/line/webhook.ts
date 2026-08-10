@@ -1,16 +1,27 @@
 import type { PrismaClient } from "@prisma/client"
-import { validateSignature, type webhook } from "@line/bot-sdk"
+import { messagingApi, validateSignature, type webhook } from "@line/bot-sdk"
 import { prisma } from "../prisma"
-import { createReport, ReportSource } from "../report-service"
+import {
+  createReport,
+  findLatestReport,
+  ReportSource,
+} from "../report-service"
 import { parseLineMessage } from "./parse-message"
+import {
+  formatInvalidReportReply,
+  formatReportReply,
+  formatStatusReply,
+} from "./reply-message"
 
 type WebhookDatabase = Pick<PrismaClient, "$transaction">
+type LineReplyClient = Pick<messagingApi.MessagingApiClient, "replyMessage">
 
 type ErrorLogger = Pick<Console, "error">
 
 export type LineWebhookDependencies = {
   channelSecret: string
   allowedGroupId: string
+  lineClient: LineReplyClient
   database?: WebhookDatabase
   logger?: ErrorLogger
 }
@@ -49,35 +60,71 @@ async function processEvent(
   event: webhook.Event,
   allowedGroupId: string,
   database: WebhookDatabase
-) {
+): Promise<string | null> {
   if (
-    event.type !== "message" ||
-    event.message.type !== "text" ||
     event.source?.type !== "group" ||
     event.source.groupId !== allowedGroupId
   ) {
-    return
+    return null
+  }
+
+  const source = event.source
+
+  if (event.type === "unsend") {
+    await database.$transaction(async (transaction) => {
+      const receipt = await transaction.webhookReceipt.createMany({
+        data: { webhookEventId: event.webhookEventId },
+        skipDuplicates: true,
+      })
+
+      if (receipt.count === 0) {
+        return
+      }
+
+      await transaction.report.deleteMany({
+        where: {
+          lineMessageId: event.unsend.messageId,
+          lineGroupId: source.groupId,
+        },
+      })
+    })
+
+    return null
+  }
+
+  if (event.type !== "message" || event.message.type !== "text") {
+    return null
   }
 
   const message = event.message
-  const source = event.source
   const parsedMessage = parseLineMessage(message.text)
 
-  if (parsedMessage.type !== "report") {
-    return
+  if (parsedMessage.type === "ignore") {
+    return null
   }
 
-  await database.$transaction(async (transaction) => {
+  return database.$transaction(async (transaction) => {
     const receipt = await transaction.webhookReceipt.createMany({
       data: { webhookEventId: event.webhookEventId },
       skipDuplicates: true,
     })
 
     if (receipt.count === 0) {
-      return
+      return null
     }
 
-    await createReport(
+    if (parsedMessage.type === "invalid-report") {
+      return formatInvalidReportReply()
+    }
+
+    if (parsedMessage.type === "status") {
+      const toyonaka = await findLatestReport("豊中", transaction)
+      const suita = await findLatestReport("吹田", transaction)
+
+      return formatStatusReply({ toyonaka, suita })
+    }
+
+    const result = await createReport(
       {
         ...parsedMessage.data,
         source: ReportSource.LINE,
@@ -89,6 +136,8 @@ async function processEvent(
       },
       transaction
     )
+
+    return formatReportReply(result)
   })
 }
 
@@ -97,6 +146,7 @@ export async function handleLineWebhook(
   {
     channelSecret,
     allowedGroupId,
+    lineClient,
     database = prisma,
     logger = console,
   }: LineWebhookDependencies
@@ -119,7 +169,31 @@ export async function handleLineWebhook(
 
   try {
     for (const event of webhookBody.events) {
-      await processEvent(event, allowedGroupId, database)
+      const replyText = await processEvent(event, allowedGroupId, database)
+
+      if (!replyText) {
+        continue
+      }
+
+      if (event.type !== "message" || !event.replyToken) {
+        logger.error("LINE reply skipped", {
+          webhookEventId: event.webhookEventId,
+          reason: "missing_reply_token",
+        })
+        continue
+      }
+
+      try {
+        await lineClient.replyMessage({
+          replyToken: event.replyToken,
+          messages: [{ type: "text", text: replyText }],
+        })
+      } catch (error) {
+        logger.error("LINE reply failed", {
+          webhookEventId: event.webhookEventId,
+          ...getSafeErrorDetails(error),
+        })
+      }
     }
   } catch (error) {
     logger.error(
