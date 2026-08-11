@@ -1,9 +1,34 @@
-import { parseReportInput, type ReportInput } from "../report-input"
+import {
+  isValidReportCount,
+  parseReportInput,
+  type ReportInput,
+} from "../report-input"
+
+export const TUBES_PER_BOX = 10
+
+export type PurchaseMessageData = {
+  boxCount: number
+  allocations: Array<{
+    location: ReportInput["location"]
+    tubeCount: number
+  }>
+}
+
+export type TransferMessageData = {
+  fromLocation: ReportInput["location"]
+  toLocation: ReportInput["location"]
+  tubeCount: number
+}
 
 export type ParsedLineMessage =
   | { type: "report"; data: ReportInput }
   | { type: "status" }
+  | { type: "delete-report" }
+  | { type: "purchase"; data: PurchaseMessageData }
+  | { type: "transfer"; data: TransferMessageData }
   | { type: "invalid-report" }
+  | { type: "invalid-purchase" }
+  | { type: "invalid-transfer" }
   | { type: "ignore" }
 
 const REPORT_PATTERN =
@@ -11,11 +36,196 @@ const REPORT_PATTERN =
 
 const REPORT_KEYWORDS = ["ニュー", "セミ"]
 
+const PURCHASE_PATTERN =
+  /^シャトル[ \t]*(\d+)[ \t]*箱[ \t]*購入しました(?:[。. \t]*(.*))?$/
+
+const FULL_TRANSFER_PATTERN =
+  /^(?:シャトル[ \t]*を?[ \t]*)?(豊中|吹田)[ \t]*から[ \t]*(豊中|吹田)[ \t]*(?:へ|に)[ \t]*(-?\d+(?:\.\d+)?)[ \t]*(?:筒)?[ \t]*移動しました[。.]?$/
+
+const DESTINATION_ONLY_TRANSFER_PATTERN =
+  /^(?:シャトル[ \t]*を?[ \t]*)?(豊中|吹田)[ \t]*(?:へ|に)[ \t]*(-?\d+(?:\.\d+)?)[ \t]*(?:筒)?[ \t]*移動しました[。.]?$/
+
+const DELETE_REPORT_COMMANDS = ["シャトル報告削除", "報告削除", "削除"]
+
+function parsePurchaseMessage(message: string): PurchaseMessageData | null {
+  const match = message.match(PURCHASE_PATTERN)
+
+  if (!match) {
+    return null
+  }
+
+  const boxCount = Number(match[1])
+
+  if (!Number.isSafeInteger(boxCount) || boxCount <= 0) {
+    return null
+  }
+
+  const purchasedTubes = boxCount * TUBES_PER_BOX
+
+  if (!Number.isSafeInteger(purchasedTubes)) {
+    return null
+  }
+
+  const allocationText = (match[2] ?? "")
+    .trim()
+    .replace(/[。.]+$/, "")
+    .replace(/です$/, "")
+    .replace(/[ \t]/g, "")
+
+  if (allocationText.length === 0) {
+    return {
+      boxCount,
+      allocations: [{ location: "豊中", tubeCount: purchasedTubes }],
+    }
+  }
+
+  const compactAllocationText = allocationText.replace(/[、,\/／・]/g, "")
+  const locationlessAllocation = compactAllocationText.match(/^(\d+)(?:筒)?$/)
+
+  if (locationlessAllocation) {
+    const tubeCount = Number(locationlessAllocation[1])
+
+    if (
+      !Number.isSafeInteger(tubeCount) ||
+      tubeCount !== purchasedTubes
+    ) {
+      return null
+    }
+
+    return {
+      boxCount,
+      allocations: [{ location: "豊中", tubeCount }],
+    }
+  }
+
+  const allocationMatches = [
+    ...compactAllocationText.matchAll(/(豊中|吹田)(\d+)(?:筒)?/g),
+  ]
+
+  if (
+    allocationMatches.length === 0 ||
+    allocationMatches.map((allocation) => allocation[0]).join("") !==
+      compactAllocationText
+  ) {
+    return null
+  }
+
+  const allocations: PurchaseMessageData["allocations"] = []
+  const specifiedLocations = new Set<ReportInput["location"]>()
+
+  for (const allocationMatch of allocationMatches) {
+    const location = allocationMatch[1] as ReportInput["location"]
+    const tubeCount = Number(allocationMatch[2])
+
+    if (
+      specifiedLocations.has(location) ||
+      !Number.isSafeInteger(tubeCount) ||
+      tubeCount <= 0
+    ) {
+      return null
+    }
+
+    specifiedLocations.add(location)
+    allocations.push({ location, tubeCount })
+  }
+
+  const allocatedTubes = allocations.reduce(
+    (total, allocation) => total + allocation.tubeCount,
+    0
+  )
+
+  if (
+    !Number.isSafeInteger(allocatedTubes) ||
+    allocatedTubes !== purchasedTubes
+  ) {
+    return null
+  }
+
+  return { boxCount, allocations }
+}
+
+function parseTransferMessage(message: string): TransferMessageData | null {
+  const fullMatch = message.match(FULL_TRANSFER_PATTERN)
+
+  if (fullMatch) {
+    return validateTransferMessage({
+      fromLocation: fullMatch[1] as ReportInput["location"],
+      toLocation: fullMatch[2] as ReportInput["location"],
+      tubeCount: Number(fullMatch[3]),
+    })
+  }
+
+  const destinationOnlyMatch = message.match(DESTINATION_ONLY_TRANSFER_PATTERN)
+
+  if (!destinationOnlyMatch) {
+    return null
+  }
+
+  const toLocation = destinationOnlyMatch[1] as ReportInput["location"]
+
+  return validateTransferMessage({
+    fromLocation: toLocation === "豊中" ? "吹田" : "豊中",
+    toLocation,
+    tubeCount: Number(destinationOnlyMatch[2]),
+  })
+}
+
+function validateTransferMessage({
+  fromLocation,
+  toLocation,
+  tubeCount,
+}: TransferMessageData): TransferMessageData | null {
+
+  if (
+    fromLocation === toLocation ||
+    !isValidReportCount(tubeCount) ||
+    tubeCount === 0
+  ) {
+    return null
+  }
+
+  return { fromLocation, toLocation, tubeCount }
+}
+
 export function parseLineMessage(message: string): ParsedLineMessage {
   const normalizedMessage = message.normalize("NFKC").trim()
 
-  if (normalizedMessage === "シャトル残量") {
+  if (
+    normalizedMessage === "シャトル残量" ||
+    normalizedMessage === "残量"
+  ) {
     return { type: "status" }
+  }
+
+  if (DELETE_REPORT_COMMANDS.includes(normalizedMessage)) {
+    return { type: "delete-report" }
+  }
+
+  const purchase = parsePurchaseMessage(normalizedMessage)
+
+  if (purchase) {
+    return { type: "purchase", data: purchase }
+  }
+
+  if (
+    normalizedMessage.includes("シャトル") &&
+    normalizedMessage.includes("購入")
+  ) {
+    return { type: "invalid-purchase" }
+  }
+
+  const transfer = parseTransferMessage(normalizedMessage)
+
+  if (transfer) {
+    return { type: "transfer", data: transfer }
+  }
+
+  if (
+    (normalizedMessage.includes("豊中") ||
+      normalizedMessage.includes("吹田")) &&
+    normalizedMessage.includes("移動")
+  ) {
+    return { type: "invalid-transfer" }
   }
 
   const match = normalizedMessage.match(REPORT_PATTERN)

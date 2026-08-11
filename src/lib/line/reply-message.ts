@@ -1,9 +1,37 @@
-import type { Report } from "@prisma/client"
+import type {
+  CurrentInventory,
+  InventoryLocation,
+  InventorySnapshot,
+} from "../inventory-service"
 import type { CreateReportResult } from "../report-service"
+import {
+  TUBES_PER_BOX,
+  type PurchaseMessageData,
+  type TransferMessageData,
+} from "./parse-message"
 
 const INVALID_REPORT_REPLY = `⚠️ 登録できませんでした
 「吹田ニュー2セミ3です。」の形式で送信してください。
 数値は0.5刻みで入力できます。`
+
+const DELETE_REPORT_WITHOUT_QUOTE_REPLY = `⚠️ 削除できませんでした
+削除したい報告メッセージにLINEの「リプライ」で
+「削除」「報告削除」「シャトル報告削除」のいずれかを送信してください。`
+
+const DELETE_REPORT_NOT_FOUND_REPLY = `⚠️ 削除できませんでした
+引用元がLINE報告ではないか、すでに削除されています。`
+
+const DELETE_REPORT_SUCCEEDED_REPLY = `✅ 引用したシャトル報告を削除しました
+
+LINE上の元メッセージ自体は削除されません。`
+
+const INVALID_PURCHASE_REPLY = `⚠️ 購入を登録できませんでした
+「シャトル1箱購入しました。豊中6筒、吹田4筒です。」の形式で送信してください。
+1箱は10筒で、配分の合計を購入した筒数と一致させてください。`
+
+const INVALID_TRANSFER_REPLY = `⚠️ 移動を登録できませんでした
+「シャトルを豊中から吹田へ2筒移動しました。」の形式で送信してください。
+移動量は0より大きい0.5筒刻みで入力できます。`
 
 function formatCount(value: number) {
   return Object.is(value, -0) ? "0" : String(value)
@@ -31,12 +59,15 @@ function formatReportedAt(reportedAt: Date) {
   return `${values.month}月${values.day}日 ${values.hour}:${values.minute}`
 }
 
-function formatLocationStatus(location: "豊中" | "吹田", report: Report | null) {
-  if (!report) {
+function formatLocationStatus(
+  location: InventoryLocation,
+  inventory: InventorySnapshot
+) {
+  if (!inventory.updatedAt) {
     return `${location}：報告なし`
   }
 
-  return `${location}：ニュー${formatCount(report.newCount)} / セミ${formatCount(report.semiCount)}`
+  return `${location}：ニュー${formatCount(inventory.newCount)} / セミ${formatCount(inventory.semiCount)}`
 }
 
 export function formatReportReply({ report, difference }: CreateReportResult) {
@@ -54,19 +85,75 @@ export function formatInvalidReportReply() {
   return INVALID_REPORT_REPLY
 }
 
-export function formatStatusReply({
-  toyonaka,
-  suita,
+export function formatDeleteReportWithoutQuoteReply() {
+  return DELETE_REPORT_WITHOUT_QUOTE_REPLY
+}
+
+export function formatDeleteReportNotFoundReply() {
+  return DELETE_REPORT_NOT_FOUND_REPLY
+}
+
+export function formatDeleteReportSucceededReply() {
+  return DELETE_REPORT_SUCCEEDED_REPLY
+}
+
+export function formatPurchaseReply({
+  boxCount,
+  allocations,
+}: PurchaseMessageData) {
+  const totalTubes = boxCount * TUBES_PER_BOX
+  const allocationLines = allocations
+    .map(
+      ({ location, tubeCount }) =>
+        `${location}：${formatCount(tubeCount)}筒`
+    )
+    .join("\n")
+
+  return `✅ シャトル購入を登録しました
+
+${boxCount}箱（${totalTubes}筒）
+${allocationLines}`
+}
+
+export function formatInvalidPurchaseReply() {
+  return INVALID_PURCHASE_REPLY
+}
+
+export function formatTransferReply({
+  fromLocation,
+  toLocation,
+  tubeCount,
+}: TransferMessageData) {
+  return `✅ シャトル移動を登録しました
+
+${fromLocation} → ${toLocation}
+${formatCount(tubeCount)}筒`
+}
+
+export function formatInvalidTransferReply() {
+  return INVALID_TRANSFER_REPLY
+}
+
+export function formatInsufficientTransferReply({
+  location,
+  availableCount,
 }: {
-  toyonaka: Report | null
-  suita: Report | null
+  location: InventoryLocation
+  availableCount: number
 }) {
-  const latestReport = [toyonaka, suita]
-    .filter((report): report is Report => report !== null)
-    .sort((a, b) => b.reportedAt.getTime() - a.reportedAt.getTime())[0]
-  const latestReportedAt = latestReport
-    ? formatReportedAt(latestReport.reportedAt)
+  return `⚠️ 移動を登録できませんでした
+${location}のニュー残量は${formatCount(availableCount)}筒です。
+残量以下の移動量を入力してください。`
+}
+
+export function formatStatusReply(inventory: CurrentInventory) {
+  const latestUpdatedAt = Object.values(inventory)
+    .map((snapshot) => snapshot.updatedAt)
+    .filter((updatedAt): updatedAt is Date => updatedAt !== null)
+    .sort((a, b) => b.getTime() - a.getTime())[0]
+  const formattedUpdatedAt = latestUpdatedAt
+    ? formatReportedAt(latestUpdatedAt)
     : "報告なし"
 
-  return `🏸 現在のシャトル残量\n\n${formatLocationStatus("豊中", toyonaka)}\n${formatLocationStatus("吹田", suita)}\n\n最終報告：${latestReportedAt}`
+  return `🏸 現在のシャトル残量\n\n${formatLocationStatus("豊中", inventory["豊中"])}\n${formatLocationStatus("吹田", inventory["吹田"])}\n\n最終更新：${formattedUpdatedAt}`
 }

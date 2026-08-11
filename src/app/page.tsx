@@ -1,22 +1,12 @@
-import Link from "next/link"
-import { prisma } from "@/lib/prisma"
 import { Button } from "@/components/ui/button"
+import { NavigationLink } from "@/components/navigation-link"
+import { getCurrentInventory } from "@/lib/inventory-service"
 
 export const dynamic = "force-dynamic"
 
 export default async function Home() {
-  const locations = ["豊中", "吹田"]
-  const reports = await Promise.all(
-    locations.map((location) => {
-        return prisma.report.findFirst({
-            where: {location},
-            orderBy: [
-              { reportedAt: "desc" },
-              { createdAt: "desc" },
-            ]
-        })
-    })
-  )
+  const locations = ["豊中", "吹田"] as const
+  const inventory = await getCurrentInventory()
 
   return(
     <div className="min-h-screen flex flex-col items-center justify-center gap-10">
@@ -25,8 +15,8 @@ export default async function Home() {
       </h1>
 
       <div className="flex gap-10">
-        {reports.map((report, index) => {
-          const location = locations[index]
+        {locations.map((location) => {
+          const snapshot = inventory[location]
           return (
             <div
               key={location}
@@ -36,17 +26,17 @@ export default async function Home() {
                 {location}
               </h2>
 
-              {report ? (
+              {snapshot.updatedAt ? (
                 <div className="space-y-2">
                   <p className="text-xl">ニュー</p>
-                  <p className="text-3xl">{report.newCount}</p>
+                  <p className="text-3xl">{snapshot.newCount}</p>
 
                   <p className="text-xl">セミ</p>
-                  <p className="text-3xl">{report.semiCount}</p>
+                  <p className="text-3xl">{snapshot.semiCount}</p>
                 </div>
               ) : (
                 <p className="mt-4 text-muted-foreground">
-                  まだ報告がありません
+                  まだ記録がありません
                 </p>
               )}
             </div>
@@ -55,15 +45,13 @@ export default async function Home() {
       </div>
 
       <div className="flex flex-col gap-4 w-48">
-        <Link
-          href="/report"
-        >
-          <Button className="w-full">シャトル報告</Button>
-        </Link>
+        <Button asChild className="w-full">
+          <NavigationLink href="/report">シャトル報告</NavigationLink>
+        </Button>
 
-        <Link href="/history">
-          <Button variant="outline" className="w-full">履歴</Button>
-        </Link>
+        <Button asChild variant="outline" className="w-full">
+          <NavigationLink href="/history">履歴</NavigationLink>
+        </Button>
 
       </div>
     </div>

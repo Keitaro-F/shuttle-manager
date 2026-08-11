@@ -2,6 +2,7 @@
 
 import { useState } from "react"
 import { useRouter } from "next/navigation"
+import { NavigationLink } from "@/components/navigation-link"
 import { Button } from "@/components/ui/button"
 import {
   Field,
@@ -59,14 +60,13 @@ export default function ReportPage() {
             setError(
                 error instanceof Error ? error.message : "登録に失敗しました"
             )
-        } finally {
             setSubmitting(false)
         }
     }
 
   return(
     <div className="flex items-center justify-center w-full h-screen ">
-    <form onSubmit={handleSubmit}>
+    <form onSubmit={handleSubmit} aria-busy={submitting}>
         <FieldSet>
             <FieldLegend>シャトル報告フォーム</FieldLegend>
             <FieldDescription>間違いのないよう入力してください</FieldDescription>
@@ -86,6 +86,7 @@ export default function ReportPage() {
                     <Select
                         value={location}
                         onValueChange={setLocation}
+                        disabled={submitting}
                     >
                         <SelectTrigger>
                             <SelectValue placeholder="拠点を選んでください" />
@@ -111,6 +112,7 @@ export default function ReportPage() {
                         min="0"
                         value={newCount}
                         onChange={(e)=>setNewCount(e.target.value)}
+                        disabled={submitting}
                         required
                     />
                     <FieldDescription>
@@ -127,6 +129,7 @@ export default function ReportPage() {
                         min="0"
                         value={semiCount}
                         onChange={(e)=>setSemiCount(e.target.value)}
+                        disabled={submitting}
                         required
                     />
                     <FieldDescription>
@@ -134,13 +137,25 @@ export default function ReportPage() {
                     </FieldDescription>
                 </Field>
                 <Field>
-                    <Button type="submit" disabled={submitting}>
-                        {submitting ? "送信中..." : "提出"}
+                    <Button
+                        type="submit"
+                        disabled={submitting}
+                        aria-live="polite"
+                    >
+                        {submitting && (
+                            <span
+                                aria-hidden="true"
+                                className="size-3.5 animate-spin rounded-full border-2 border-current border-t-transparent"
+                            />
+                        )}
+                        {submitting ? "登録中..." : "提出"}
                     </Button>
                 </Field>
                 <Field>
-                    <Button type="button" variant="outline" onClick={()=>router.push("/")}>
-                        ホームに戻る
+                    <Button asChild variant="outline">
+                        <NavigationLink href="/">
+                            ホームに戻る
+                        </NavigationLink>
                     </Button>
                 </Field>
             </FieldGroup>

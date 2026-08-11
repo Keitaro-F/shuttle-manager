@@ -1,16 +1,21 @@
 import type { PrismaClient } from "@prisma/client"
 import { messagingApi, validateSignature, type webhook } from "@line/bot-sdk"
+import { getCurrentInventory } from "../inventory-service"
 import { prisma } from "../prisma"
+import { createReport, ReportSource } from "../report-service"
+import { parseLineMessage, TUBES_PER_BOX } from "./parse-message"
 import {
-  createReport,
-  findLatestReport,
-  ReportSource,
-} from "../report-service"
-import { parseLineMessage } from "./parse-message"
-import {
+  formatDeleteReportNotFoundReply,
+  formatDeleteReportSucceededReply,
+  formatDeleteReportWithoutQuoteReply,
   formatInvalidReportReply,
+  formatInvalidPurchaseReply,
+  formatInvalidTransferReply,
+  formatInsufficientTransferReply,
+  formatPurchaseReply,
   formatReportReply,
   formatStatusReply,
+  formatTransferReply,
 } from "./reply-message"
 
 type WebhookDatabase = Pick<PrismaClient, "$transaction">
@@ -104,6 +109,20 @@ async function processEvent(
           lineGroupId: source.groupId,
         },
       })
+
+      await transaction.purchase.deleteMany({
+        where: {
+          lineMessageId: event.unsend.messageId,
+          lineGroupId: source.groupId,
+        },
+      })
+
+      await transaction.shuttleTransfer.deleteMany({
+        where: {
+          lineMessageId: event.unsend.messageId,
+          lineGroupId: source.groupId,
+        },
+      })
     })
 
     return null
@@ -134,11 +153,84 @@ async function processEvent(
       return formatInvalidReportReply()
     }
 
-    if (parsedMessage.type === "status") {
-      const toyonaka = await findLatestReport("豊中", transaction)
-      const suita = await findLatestReport("吹田", transaction)
+    if (parsedMessage.type === "invalid-purchase") {
+      return formatInvalidPurchaseReply()
+    }
 
-      return formatStatusReply({ toyonaka, suita })
+    if (parsedMessage.type === "invalid-transfer") {
+      return formatInvalidTransferReply()
+    }
+
+    if (parsedMessage.type === "status") {
+      const inventory = await getCurrentInventory(transaction)
+
+      return formatStatusReply(inventory)
+    }
+
+    if (parsedMessage.type === "delete-report") {
+      if (!message.quotedMessageId) {
+        return formatDeleteReportWithoutQuoteReply()
+      }
+
+      const result = await transaction.report.deleteMany({
+        where: {
+          lineMessageId: message.quotedMessageId,
+          lineGroupId: source.groupId,
+        },
+      })
+
+      return result.count === 1
+        ? formatDeleteReportSucceededReply()
+        : formatDeleteReportNotFoundReply()
+    }
+
+    if (parsedMessage.type === "purchase") {
+      await transaction.purchase.create({
+        data: {
+          boxCount: parsedMessage.data.boxCount,
+          tubesPerBox: TUBES_PER_BOX,
+          purchasedAt: new Date(event.timestamp),
+          lineMessageId: message.id,
+          lineGroupId: source.groupId,
+          lineUserId: source.userId ?? null,
+          originalMessage: message.text,
+          allocations: {
+            create: parsedMessage.data.allocations,
+          },
+        },
+      })
+
+      const inventory = await getCurrentInventory(transaction)
+
+      return `${formatPurchaseReply(parsedMessage.data)}\n\n${formatStatusReply(inventory)}`
+    }
+
+    if (parsedMessage.type === "transfer") {
+      const inventoryBeforeTransfer = await getCurrentInventory(transaction)
+      const sourceInventory =
+        inventoryBeforeTransfer[parsedMessage.data.fromLocation]
+
+      if (sourceInventory.newCount < parsedMessage.data.tubeCount) {
+        return formatInsufficientTransferReply({
+          location: parsedMessage.data.fromLocation,
+          availableCount: sourceInventory.newCount,
+        })
+      }
+
+      await transaction.shuttleTransfer.create({
+        data: {
+          ...parsedMessage.data,
+          transferredAt: new Date(event.timestamp),
+          lineMessageId: message.id,
+          lineGroupId: source.groupId,
+          lineUserId: source.userId ?? null,
+          originalMessage: message.text,
+        },
+      })
+
+      const inventory = await getCurrentInventory(transaction)
+
+      return `${formatTransferReply(parsedMessage.data)}\n\n${formatStatusReply(inventory)}`
     }
 
     const result = await createReport(
@@ -154,7 +246,9 @@ async function processEvent(
       transaction
     )
 
-    return formatReportReply(result)
+    const inventory = await getCurrentInventory(transaction)
+
+    return `${formatReportReply(result)}\n\n${formatStatusReply(inventory)}`
   })
 }
 

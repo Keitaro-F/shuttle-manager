@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { useRouter, useParams } from "next/navigation"
+import { NavigationLink } from "@/components/navigation-link"
 import { Button } from "@/components/ui/button"
 import {
   Field,
@@ -92,17 +93,28 @@ export default function EditPage() {
       setError(
         error instanceof Error ? error.message : "更新に失敗しました"
       )
-    } finally {
       setSubmitting(false)
     }
   }
 
   if (loading) {
-    return <p className="p-5">読み込み中...</p>
+    return (
+      <div
+        role="status"
+        aria-live="polite"
+        className="flex min-h-screen items-center justify-center gap-3"
+      >
+        <span
+          aria-hidden="true"
+          className="size-6 animate-spin rounded-full border-4 border-muted border-t-foreground"
+        />
+        <p className="text-sm text-muted-foreground">読み込み中...</p>
+      </div>
+    )
   }
   return(
     <div className="flex items-center justify-center w-full h-screen ">
-    <form onSubmit={handleSubmit}>
+    <form onSubmit={handleSubmit} aria-busy={submitting}>
         <FieldSet>
             <FieldLegend>シャトル報告フォーム</FieldLegend>
             <FieldDescription>間違いのないよう入力してください</FieldDescription>
@@ -122,6 +134,7 @@ export default function EditPage() {
                     <Select
                         value={location}
                         onValueChange={setLocation}
+                        disabled={submitting}
                     >
                         <SelectTrigger>
                             <SelectValue placeholder="拠点を選んでください" />
@@ -147,6 +160,7 @@ export default function EditPage() {
                         min="0"
                         value={newCount}
                         onChange={(e)=>setNewCount(e.target.value)}
+                        disabled={submitting}
                         required
                     />
                     <FieldDescription>
@@ -163,6 +177,7 @@ export default function EditPage() {
                         min="0"
                         value={semiCount}
                         onChange={(e)=>setSemiCount(e.target.value)}
+                        disabled={submitting}
                         required
                     />
                     <FieldDescription>
@@ -170,13 +185,25 @@ export default function EditPage() {
                     </FieldDescription>
                 </Field>
                 <Field>
-                    <Button type="submit" disabled={submitting}>
+                    <Button
+                        type="submit"
+                        disabled={submitting}
+                        aria-live="polite"
+                    >
+                        {submitting && (
+                            <span
+                                aria-hidden="true"
+                                className="size-3.5 animate-spin rounded-full border-2 border-current border-t-transparent"
+                            />
+                        )}
                         {submitting ? "更新中..." : "更新"}
                     </Button>
                 </Field>
                 <Field>
-                    <Button type="button" variant="outline" onClick={()=>router.push("/history")}>
-                        履歴に戻る
+                    <Button asChild variant="outline">
+                        <NavigationLink href="/history">
+                            履歴に戻る
+                        </NavigationLink>
                     </Button>
                 </Field>
             </FieldGroup>
@@ -185,4 +212,3 @@ export default function EditPage() {
     </div>
   )
 }
-

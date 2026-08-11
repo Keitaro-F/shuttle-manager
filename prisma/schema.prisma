@@ -40,3 +40,47 @@ model WebhookReceipt {
   webhookEventId String   @id
   processedAt    DateTime @default(now())
 }
+
+model Purchase {
+  id              String               @id @default(cuid())
+  boxCount        Int
+  tubesPerBox     Int
+  purchasedAt     DateTime             @default(now())
+  lineMessageId   String               @unique
+  lineGroupId     String
+  lineUserId      String?
+  originalMessage String
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+  allocations     PurchaseAllocation[]
+
+  @@index([purchasedAt(sort: Desc)])
+}
+
+model PurchaseAllocation {
+  id         String   @id @default(cuid())
+  purchaseId String
+  location   String
+  tubeCount  Int
+  createdAt  DateTime @default(now())
+  purchase   Purchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+
+  @@unique([purchaseId, location])
+  @@index([location])
+}
+
+model ShuttleTransfer {
+  id              String   @id @default(cuid())
+  fromLocation    String
+  toLocation      String
+  tubeCount       Float
+  transferredAt   DateTime @default(now())
+  lineMessageId   String   @unique
+  lineGroupId     String
+  lineUserId      String?
+  originalMessage String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([transferredAt(sort: Desc)])
+}
