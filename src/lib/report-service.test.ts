@@ -21,21 +21,51 @@ function makeReport(overrides: Partial<Report> = {}): Report {
 }
 
 describe("createReport", () => {
-  it("前回報告を取得して保存し、差分を返す", async () => {
+  it("前回報告以降の購入・移動を反映して差分を返す", async () => {
     const previousReport = makeReport({
       id: "previous-id",
-      newCount: 3,
-      semiCount: 2.5,
+      newCount: 10,
+      semiCount: 2,
+      reportedAt: new Date("2026-08-07T09:00:00.000Z"),
     })
-    const report = makeReport()
-    const findFirst = vi.fn().mockResolvedValue(previousReport)
+    const report = makeReport({ newCount: 12, semiCount: 3 })
+    const findFirst = vi.fn(
+      async ({ where }: { where: { location: string } }) =>
+        where.location === "吹田" ? previousReport : null
+    )
     const create = vi.fn().mockResolvedValue(report)
-    const database = { report: { findFirst, create } }
+    const database = {
+      report: { findFirst, create },
+      purchaseAllocation: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            location: "吹田",
+            tubeCount: 5,
+            purchase: {
+              purchasedAt: new Date("2026-08-07T12:00:00.000Z"),
+              createdAt: new Date("2026-08-07T12:00:01.000Z"),
+            },
+          },
+        ]),
+      },
+      shuttleTransfer: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            fromLocation: "吹田",
+            toLocation: "豊中",
+            tubeCount: 2,
+            semiTubeCount: 1,
+            transferredAt: new Date("2026-08-07T13:00:00.000Z"),
+            createdAt: new Date("2026-08-07T13:00:01.000Z"),
+          },
+        ]),
+      },
+    }
 
     const result = await createReport(
       {
         location: "吹田",
-        newCount: 2,
+        newCount: 12,
         semiCount: 3,
         source: ReportSource.LINE,
         reportedAt: report.reportedAt,
@@ -48,7 +78,10 @@ describe("createReport", () => {
     )
 
     expect(findFirst).toHaveBeenCalledWith({
-      where: { location: "吹田" },
+      where: {
+        location: "吹田",
+        reportedAt: { lte: report.reportedAt },
+      },
       orderBy: [
         { reportedAt: "desc" },
         { createdAt: "desc" },
@@ -57,7 +90,7 @@ describe("createReport", () => {
     expect(create).toHaveBeenCalledWith({
       data: {
         location: "吹田",
-        newCount: 2,
+        newCount: 12,
         semiCount: 3,
         source: ReportSource.LINE,
         reportedAt: report.reportedAt,
@@ -70,7 +103,7 @@ describe("createReport", () => {
     expect(result).toEqual({
       report,
       previousReport,
-      difference: { newCount: -1, semiCount: 0.5 },
+      difference: { newCount: -1, semiCount: 2 },
     })
   })
 
@@ -87,6 +120,8 @@ describe("createReport", () => {
         findFirst: vi.fn().mockResolvedValue(null),
         create: vi.fn().mockResolvedValue(report),
       },
+      purchaseAllocation: { findMany: vi.fn().mockResolvedValue([]) },
+      shuttleTransfer: { findMany: vi.fn().mockResolvedValue([]) },
     }
 
     const result = await createReport(
@@ -95,6 +130,7 @@ describe("createReport", () => {
         newCount: 2,
         semiCount: 3,
         source: ReportSource.WEB,
+        reportedAt: report.reportedAt,
       },
       database as never
     )

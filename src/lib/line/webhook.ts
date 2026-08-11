@@ -210,10 +210,14 @@ async function processEvent(
       const sourceInventory =
         inventoryBeforeTransfer[parsedMessage.data.fromLocation]
 
-      if (sourceInventory.newCount < parsedMessage.data.tubeCount) {
+      if (
+        sourceInventory.newCount < parsedMessage.data.tubeCount ||
+        sourceInventory.semiCount < parsedMessage.data.semiTubeCount
+      ) {
         return formatInsufficientTransferReply({
           location: parsedMessage.data.fromLocation,
-          availableCount: sourceInventory.newCount,
+          availableInventory: sourceInventory,
+          requestedTransfer: parsedMessage.data,
         })
       }
 

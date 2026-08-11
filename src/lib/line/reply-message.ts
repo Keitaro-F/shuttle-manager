@@ -30,7 +30,8 @@ const INVALID_PURCHASE_REPLY = `⚠️ 購入を登録できませんでした
 1箱は10筒で、配分の合計を購入した筒数と一致させてください。`
 
 const INVALID_TRANSFER_REPLY = `⚠️ 移動を登録できませんでした
-「シャトルを豊中から吹田へ2筒移動しました。」の形式で送信してください。
+「豊中から吹田へニュー2筒セミ1筒移動」の形式で送信してください。
+ニュー・セミの片方だけでも入力でき、種類を省略した場合はニューとして扱います。
 移動量は0より大きい0.5筒刻みで入力できます。`
 
 function formatCount(value: number) {
@@ -123,11 +124,17 @@ export function formatTransferReply({
   fromLocation,
   toLocation,
   tubeCount,
+  semiTubeCount,
 }: TransferMessageData) {
+  const countLines = [
+    tubeCount > 0 ? `ニュー：${formatCount(tubeCount)}筒` : null,
+    semiTubeCount > 0 ? `セミ：${formatCount(semiTubeCount)}筒` : null,
+  ].filter((line): line is string => line !== null)
+
   return `✅ シャトル移動を登録しました
 
 ${fromLocation} → ${toLocation}
-${formatCount(tubeCount)}筒`
+${countLines.join("\n")}`
 }
 
 export function formatInvalidTransferReply() {
@@ -136,13 +143,24 @@ export function formatInvalidTransferReply() {
 
 export function formatInsufficientTransferReply({
   location,
-  availableCount,
+  availableInventory,
+  requestedTransfer,
 }: {
   location: InventoryLocation
-  availableCount: number
+  availableInventory: InventorySnapshot
+  requestedTransfer: TransferMessageData
 }) {
+  const shortageLines = [
+    requestedTransfer.tubeCount > availableInventory.newCount
+      ? `${location}のニュー残量は${formatCount(availableInventory.newCount)}筒です。`
+      : null,
+    requestedTransfer.semiTubeCount > availableInventory.semiCount
+      ? `${location}のセミ残量は${formatCount(availableInventory.semiCount)}筒です。`
+      : null,
+  ].filter((line): line is string => line !== null)
+
   return `⚠️ 移動を登録できませんでした
-${location}のニュー残量は${formatCount(availableCount)}筒です。
+${shortageLines.join("\n")}
 残量以下の移動量を入力してください。`
 }
 

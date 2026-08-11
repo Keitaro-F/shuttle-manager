@@ -18,6 +18,7 @@ export type TransferMessageData = {
   fromLocation: ReportInput["location"]
   toLocation: ReportInput["location"]
   tubeCount: number
+  semiTubeCount: number
 }
 
 export type ParsedLineMessage =
@@ -37,13 +38,13 @@ const REPORT_PATTERN =
 const REPORT_KEYWORDS = ["ニュー", "セミ"]
 
 const PURCHASE_PATTERN =
-  /^シャトル[ \t]*(\d+)[ \t]*箱[ \t]*購入しました(?:[。. \t]*(.*))?$/
+  /^(?:シャトル[ \t]*)?(\d+)[ \t]*箱[ \t]*購入しました(?:[。. \t]*(.*))?$/
 
 const FULL_TRANSFER_PATTERN =
-  /^(?:シャトル[ \t]*を?[ \t]*)?(豊中|吹田)[ \t]*から[ \t]*(豊中|吹田)[ \t]*(?:へ|に)[ \t]*(-?\d+(?:\.\d+)?)[ \t]*(?:筒)?[ \t]*移動しました[。.]?$/
+  /^(?:シャトル[ \t]*を?[ \t]*)?(豊中|吹田)[ \t]*から[ \t]*(豊中|吹田)[ \t]*(?:へ|に)[ \t]*(.+?)[ \t]*移動(?:しました)?[。.]?$/
 
 const DESTINATION_ONLY_TRANSFER_PATTERN =
-  /^(?:シャトル[ \t]*を?[ \t]*)?(豊中|吹田)[ \t]*(?:へ|に)[ \t]*(-?\d+(?:\.\d+)?)[ \t]*(?:筒)?[ \t]*移動しました[。.]?$/
+  /^(?:シャトル[ \t]*を?[ \t]*)?(豊中|吹田)[ \t]*(?:へ|に)[ \t]*(.+?)[ \t]*移動(?:しました)?[。.]?$/
 
 const DELETE_REPORT_COMMANDS = ["シャトル報告削除", "報告削除", "削除"]
 
@@ -144,14 +145,75 @@ function parsePurchaseMessage(message: string): PurchaseMessageData | null {
   return { boxCount, allocations }
 }
 
+function parseTransferCounts(
+  value: string
+): Pick<TransferMessageData, "tubeCount" | "semiTubeCount"> | null {
+  const compactValue = value.replace(/[ \t、,\/／・と]/g, "")
+  const unlabeledMatch = compactValue.match(/^(-?\d+(?:\.\d+)?)(?:筒)?$/)
+
+  if (unlabeledMatch) {
+    const tubeCount = Number(unlabeledMatch[1])
+
+    return isValidReportCount(tubeCount) && tubeCount > 0
+      ? { tubeCount, semiTubeCount: 0 }
+      : null
+  }
+
+  const countMatches = [
+    ...compactValue.matchAll(
+      /(ニュー|セミ)を?(-?\d+(?:\.\d+)?)(?:筒)?/g
+    ),
+  ]
+
+  if (
+    countMatches.length === 0 ||
+    countMatches.map((countMatch) => countMatch[0]).join("") !== compactValue
+  ) {
+    return null
+  }
+
+  let tubeCount = 0
+  let semiTubeCount = 0
+  const specifiedTypes = new Set<string>()
+
+  for (const countMatch of countMatches) {
+    const type = countMatch[1]
+    const count = Number(countMatch[2])
+
+    if (
+      specifiedTypes.has(type) ||
+      !isValidReportCount(count) ||
+      count === 0
+    ) {
+      return null
+    }
+
+    specifiedTypes.add(type)
+
+    if (type === "セミ") {
+      semiTubeCount = count
+    } else {
+      tubeCount = count
+    }
+  }
+
+  return { tubeCount, semiTubeCount }
+}
+
 function parseTransferMessage(message: string): TransferMessageData | null {
   const fullMatch = message.match(FULL_TRANSFER_PATTERN)
 
   if (fullMatch) {
+    const counts = parseTransferCounts(fullMatch[3])
+
+    if (!counts) {
+      return null
+    }
+
     return validateTransferMessage({
       fromLocation: fullMatch[1] as ReportInput["location"],
       toLocation: fullMatch[2] as ReportInput["location"],
-      tubeCount: Number(fullMatch[3]),
+      ...counts,
     })
   }
 
@@ -162,11 +224,16 @@ function parseTransferMessage(message: string): TransferMessageData | null {
   }
 
   const toLocation = destinationOnlyMatch[1] as ReportInput["location"]
+  const counts = parseTransferCounts(destinationOnlyMatch[2])
+
+  if (!counts) {
+    return null
+  }
 
   return validateTransferMessage({
     fromLocation: toLocation === "豊中" ? "吹田" : "豊中",
     toLocation,
-    tubeCount: Number(destinationOnlyMatch[2]),
+    ...counts,
   })
 }
 
@@ -174,17 +241,17 @@ function validateTransferMessage({
   fromLocation,
   toLocation,
   tubeCount,
+  semiTubeCount,
 }: TransferMessageData): TransferMessageData | null {
 
   if (
     fromLocation === toLocation ||
-    !isValidReportCount(tubeCount) ||
-    tubeCount === 0
+    (tubeCount === 0 && semiTubeCount === 0)
   ) {
     return null
   }
 
-  return { fromLocation, toLocation, tubeCount }
+  return { fromLocation, toLocation, tubeCount, semiTubeCount }
 }
 
 export function parseLineMessage(message: string): ParsedLineMessage {
@@ -208,7 +275,8 @@ export function parseLineMessage(message: string): ParsedLineMessage {
   }
 
   if (
-    normalizedMessage.includes("シャトル") &&
+    (normalizedMessage.includes("シャトル") ||
+      normalizedMessage.includes("箱")) &&
     normalizedMessage.includes("購入")
   ) {
     return { type: "invalid-purchase" }

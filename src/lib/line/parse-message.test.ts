@@ -91,6 +91,19 @@ describe("parseLineMessage", () => {
         { location: "吹田", tubeCount: 4 },
       ],
     ],
+    [
+      "1箱購入しました。豊中6筒、吹田4筒です。",
+      1,
+      [
+        { location: "豊中", tubeCount: 6 },
+        { location: "吹田", tubeCount: 4 },
+      ],
+    ],
+    [
+      "2箱購入しました",
+      2,
+      [{ location: "豊中", tubeCount: 20 }],
+    ],
   ])("購入と拠点別配分を解析する: %s", (message, boxCount, allocations) => {
     expect(parseLineMessage(message)).toEqual({
       type: "purchase",
@@ -106,29 +119,44 @@ describe("parseLineMessage", () => {
     "シャトル1箱購入しました。豊中6筒、吹田3筒です。",
     "シャトル1箱購入しました。豊中6.5筒、吹田3.5筒です。",
     "シャトル1箱購入しました。豊中5筒、豊中5筒です。",
+    "1箱購入しました。豊中6筒、吹田3筒です。",
   ])("不正な購入形式を拒否する: %s", (message) => {
     expect(parseLineMessage(message)).toEqual({ type: "invalid-purchase" })
   })
 
   it.each([
-    ["シャトルを豊中から吹田へ2筒移動しました。", "豊中", "吹田", 2],
-    ["シャトルを吹田から豊中へ０．５筒移動しました。", "吹田", "豊中", 0.5],
-    ["豊中から吹田へ2移動しました", "豊中", "吹田", 2],
-    ["吹田に2筒移動しました", "豊中", "吹田", 2],
-    ["豊中へ0.5移動しました", "吹田", "豊中", 0.5],
-    ["シャトル吹田へ２移動しました", "豊中", "吹田", 2],
-  ])("拠点間移動を解析する: %s", (message, fromLocation, toLocation, tubeCount) => {
-    expect(parseLineMessage(message)).toEqual({
-      type: "transfer",
-      data: { fromLocation, toLocation, tubeCount },
-    })
-  })
+    ["シャトルを豊中から吹田へ2筒移動しました。", "豊中", "吹田", 2, 0],
+    ["シャトルを吹田から豊中へ０．５筒移動しました。", "吹田", "豊中", 0.5, 0],
+    ["豊中から吹田へ2移動しました", "豊中", "吹田", 2, 0],
+    ["吹田に2筒移動しました", "豊中", "吹田", 2, 0],
+    ["豊中へ0.5移動しました", "吹田", "豊中", 0.5, 0],
+    ["シャトル吹田へ２移動しました", "豊中", "吹田", 2, 0],
+    ["シャトルを豊中から吹田へ2筒移動", "豊中", "吹田", 2, 0],
+    ["吹田に2筒移動", "豊中", "吹田", 2, 0],
+    ["豊中から吹田へニュー2筒移動", "豊中", "吹田", 2, 0],
+    ["吹田にセミ1.5筒移動", "豊中", "吹田", 0, 1.5],
+    ["豊中から吹田へニュー2筒セミ1筒移動", "豊中", "吹田", 2, 1],
+    ["豊中から吹田へセミを1筒、ニューを2筒移動", "豊中", "吹田", 2, 1],
+    ["吹田にニュー2筒とセミ0.5筒移動しました", "豊中", "吹田", 2, 0.5],
+  ])(
+    "拠点間移動を解析する: %s",
+    (message, fromLocation, toLocation, tubeCount, semiTubeCount) => {
+      expect(parseLineMessage(message)).toEqual({
+        type: "transfer",
+        data: { fromLocation, toLocation, tubeCount, semiTubeCount },
+      })
+    }
+  )
 
   it.each([
     "シャトルを豊中から豊中へ2筒移動しました。",
     "シャトルを豊中から吹田へ0筒移動しました。",
     "シャトルを豊中から吹田へ1.2筒移動しました。",
     "シャトルを豊中から吹田へ-1筒移動しました。",
+    "豊中から吹田へセミ0筒移動",
+    "豊中から吹田へセミ1.2筒移動",
+    "豊中から吹田へニュー1筒ニュー1筒移動",
+    "豊中から吹田へニュー2筒セミ-1筒移動",
   ])("不正な拠点間移動を拒否する: %s", (message) => {
     expect(parseLineMessage(message)).toEqual({ type: "invalid-transfer" })
   })

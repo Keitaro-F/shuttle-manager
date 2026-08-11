@@ -44,6 +44,7 @@ function makeDatabase({
     fromLocation: string
     toLocation: string
     tubeCount: number
+    semiTubeCount?: number
     transferredAt: Date
     createdAt: Date
   }>
@@ -51,9 +52,19 @@ function makeDatabase({
   return {
     report: {
       findFirst: vi.fn(
-        async ({ where }: { where: { location: string } }) =>
+        async ({
+          where,
+        }: {
+          where: { location: string; reportedAt?: { lte: Date } }
+        }) =>
           reports
-            .filter((report) => report.location === where.location)
+            .filter(
+              (report) =>
+                report.location === where.location &&
+                (!where.reportedAt ||
+                  report.reportedAt.getTime() <=
+                    where.reportedAt.lte.getTime())
+            )
             .sort(
               (a, b) =>
                 b.reportedAt.getTime() - a.reportedAt.getTime() ||
@@ -65,7 +76,12 @@ function makeDatabase({
       findMany: vi.fn().mockResolvedValue(allocations),
     },
     shuttleTransfer: {
-      findMany: vi.fn().mockResolvedValue(transfers),
+      findMany: vi.fn().mockResolvedValue(
+        transfers.map((transfer) => ({
+          semiTubeCount: 0,
+          ...transfer,
+        }))
+      ),
     },
   } as unknown as InventoryDatabase
 }
@@ -104,6 +120,7 @@ function makeTransfer(
     fromLocation: "豊中",
     toLocation: "吹田",
     tubeCount: 2,
+    semiTubeCount: 0,
     transferredAt: new Date("2026-08-12T09:00:00.000Z"),
     lineMessageId: `${id}-message-id`,
     lineGroupId: "group-id",
@@ -226,6 +243,39 @@ describe("getCurrentInventory", () => {
     expect(inventory["吹田"].newCount).toBe(3)
   })
 
+  it("ニューとセミの同時移動を両拠点の各残量へ反映する", async () => {
+    const inventory = await getCurrentInventory(
+      makeDatabase({
+        reports: [
+          makeReport({ newCount: 6, semiCount: 3 }),
+          makeReport({
+            id: "suita-report-id",
+            location: "吹田",
+            newCount: 1,
+            semiCount: 0.5,
+          }),
+        ],
+        transfers: [
+          {
+            fromLocation: "豊中",
+            toLocation: "吹田",
+            tubeCount: 2,
+            semiTubeCount: 1,
+            transferredAt: new Date("2026-08-11T09:00:00.000Z"),
+            createdAt: new Date("2026-08-11T09:00:01.000Z"),
+          },
+        ],
+      })
+    )
+
+    expect(inventory["豊中"]).toEqual(
+      expect.objectContaining({ newCount: 4, semiCount: 2 })
+    )
+    expect(inventory["吹田"]).toEqual(
+      expect.objectContaining({ newCount: 3, semiCount: 1.5 })
+    )
+  })
+
   it("Reportがない拠点では0を基準に購入を反映する", async () => {
     const inventory = await getCurrentInventory(
       makeDatabase({
@@ -250,6 +300,61 @@ describe("getCurrentInventory", () => {
     })
     expect(inventory["吹田"].updatedAt).toBeNull()
   })
+
+  it("指定時刻より後のReport・購入・移動を残量へ反映しない", async () => {
+    const asOf = new Date("2026-08-11T12:00:00.000Z")
+    const inventory = await getCurrentInventory(
+      makeDatabase({
+        reports: [
+          makeReport({ newCount: 5 }),
+          makeReport({
+            id: "future-report-id",
+            newCount: 20,
+            reportedAt: new Date("2026-08-12T09:00:00.000Z"),
+            createdAt: new Date("2026-08-12T09:00:01.000Z"),
+          }),
+        ],
+        allocations: [
+          {
+            location: "豊中",
+            tubeCount: 10,
+            purchase: {
+              purchasedAt: new Date("2026-08-11T09:00:00.000Z"),
+              createdAt: new Date("2026-08-11T09:00:01.000Z"),
+            },
+          },
+          {
+            location: "豊中",
+            tubeCount: 10,
+            purchase: {
+              purchasedAt: new Date("2026-08-12T09:00:00.000Z"),
+              createdAt: new Date("2026-08-12T09:00:01.000Z"),
+            },
+          },
+        ],
+        transfers: [
+          {
+            fromLocation: "豊中",
+            toLocation: "吹田",
+            tubeCount: 2,
+            transferredAt: new Date("2026-08-11T10:00:00.000Z"),
+            createdAt: new Date("2026-08-11T10:00:01.000Z"),
+          },
+          {
+            fromLocation: "豊中",
+            toLocation: "吹田",
+            tubeCount: 3,
+            transferredAt: new Date("2026-08-12T10:00:00.000Z"),
+            createdAt: new Date("2026-08-12T10:00:01.000Z"),
+          },
+        ],
+      }),
+      { asOf }
+    )
+
+    expect(inventory["豊中"].newCount).toBe(13)
+    expect(inventory["吹田"].newCount).toBe(2)
+  })
 })
 
 describe("calculateStockEventInventorySnapshots", () => {
@@ -272,7 +377,7 @@ describe("calculateStockEventInventorySnapshots", () => {
         },
       ],
     })
-    const transfer = makeTransfer()
+    const transfer = makeTransfer({ semiTubeCount: 1 })
 
     const snapshots = calculateStockEventInventorySnapshots({
       reports: [
@@ -295,10 +400,10 @@ describe("calculateStockEventInventorySnapshots", () => {
       expect.objectContaining({ newCount: 5, semiCount: 3 })
     )
     expect(snapshots.transfers.get(transfer.id)?.["豊中"]).toEqual(
-      expect.objectContaining({ newCount: 9, semiCount: 2 })
+      expect.objectContaining({ newCount: 9, semiCount: 1 })
     )
     expect(snapshots.transfers.get(transfer.id)?.["吹田"]).toEqual(
-      expect.objectContaining({ newCount: 7, semiCount: 3 })
+      expect.objectContaining({ newCount: 7, semiCount: 4 })
     )
   })
 

@@ -127,6 +127,7 @@ type TransferCreateData = {
   fromLocation: string
   toLocation: string
   tubeCount: number
+  semiTubeCount: number
   transferredAt: Date
   lineMessageId: string
   lineGroupId: string
@@ -164,6 +165,7 @@ function makeTransfer(
     fromLocation: "豊中",
     toLocation: "吹田",
     tubeCount: 2,
+    semiTubeCount: 0,
     transferredAt: new Date("2026-08-08T09:00:00.000Z"),
     lineMessageId: "message-id",
     lineGroupId: ALLOWED_GROUP_ID,
@@ -762,6 +764,7 @@ describe("handleLineWebhook", () => {
         fromLocation: "豊中",
         toLocation: "吹田",
         tubeCount: 2,
+        semiTubeCount: 0,
         transferredAt: new Date("2026-08-08T09:00:00.000Z"),
         lineMessageId: "message-id",
         lineGroupId: ALLOWED_GROUP_ID,
@@ -778,12 +781,73 @@ describe("handleLineWebhook", () => {
           text: `✅ シャトル移動を登録しました
 
 豊中 → 吹田
-2筒
+ニュー：2筒
 
 🏸 現在のシャトル残量
 
 豊中：ニュー3 / セミ2
 吹田：ニュー2 / セミ0
+
+最終更新：8月8日 18:00`,
+        },
+      ],
+    })
+  })
+
+  it("ニューとセミを同時に移動して保存・返信する", async () => {
+    const text = "吹田にニュー2筒セミ1筒移動"
+    const body = JSON.stringify({
+      events: [makeMessageEvent({ text })],
+    })
+    const { database, transfers, transferCreate } = makeDatabase({
+      initialReports: [
+        makeReport({
+          id: "toyonaka-report-id",
+          location: "豊中",
+          newCount: 5,
+          semiCount: 2,
+          reportedAt: new Date("2026-08-07T09:00:00.000Z"),
+          lineMessageId: "toyonaka-message-id",
+        }),
+      ],
+    })
+    const { lineClient, replyMessage } = makeLineClient()
+
+    const response = await handleLineWebhook(
+      makeRequest(body),
+      makeDependencies(database, { lineClient })
+    )
+
+    expect(response.status).toBe(200)
+    expect(transferCreate).toHaveBeenCalledWith({
+      data: {
+        fromLocation: "豊中",
+        toLocation: "吹田",
+        tubeCount: 2,
+        semiTubeCount: 1,
+        transferredAt: new Date("2026-08-08T09:00:00.000Z"),
+        lineMessageId: "message-id",
+        lineGroupId: ALLOWED_GROUP_ID,
+        lineUserId: "user-id",
+        originalMessage: text,
+      },
+    })
+    expect(transfers).toHaveLength(1)
+    expect(replyMessage).toHaveBeenCalledWith({
+      replyToken: "reply-token",
+      messages: [
+        {
+          type: "text",
+          text: `✅ シャトル移動を登録しました
+
+豊中 → 吹田
+ニュー：2筒
+セミ：1筒
+
+🏸 現在のシャトル残量
+
+豊中：ニュー3 / セミ1
+吹田：ニュー2 / セミ1
 
 最終更新：8月8日 18:00`,
         },
@@ -825,6 +889,46 @@ describe("handleLineWebhook", () => {
           type: "text",
           text: `⚠️ 移動を登録できませんでした
 豊中のニュー残量は1筒です。
+残量以下の移動量を入力してください。`,
+        },
+      ],
+    })
+  })
+
+  it("移動元のセミ残量を超える移動は保存しない", async () => {
+    const text = "吹田にセミ2筒移動"
+    const body = JSON.stringify({
+      events: [makeMessageEvent({ text })],
+    })
+    const { database, transfers, transferCreate } = makeDatabase({
+      initialReports: [
+        makeReport({
+          id: "toyonaka-report-id",
+          location: "豊中",
+          newCount: 5,
+          semiCount: 1,
+          reportedAt: new Date("2026-08-07T09:00:00.000Z"),
+          lineMessageId: "toyonaka-message-id",
+        }),
+      ],
+    })
+    const { lineClient, replyMessage } = makeLineClient()
+
+    const response = await handleLineWebhook(
+      makeRequest(body),
+      makeDependencies(database, { lineClient })
+    )
+
+    expect(response.status).toBe(200)
+    expect(transfers).toHaveLength(0)
+    expect(transferCreate).not.toHaveBeenCalled()
+    expect(replyMessage).toHaveBeenCalledWith({
+      replyToken: "reply-token",
+      messages: [
+        {
+          type: "text",
+          text: `⚠️ 移動を登録できませんでした
+豊中のセミ残量は1筒です。
 残量以下の移動量を入力してください。`,
         },
       ],

@@ -48,6 +48,7 @@ export type InventoryTimelineTransfer = Pick<
   | "fromLocation"
   | "toLocation"
   | "tubeCount"
+  | "semiTubeCount"
   | "transferredAt"
   | "createdAt"
 >
@@ -61,6 +62,10 @@ export type InventoryDatabase = Pick<
   PrismaClient,
   "report" | "purchaseAllocation" | "shuttleTransfer"
 >
+
+type InventoryQueryOptions = {
+  asOf?: Date
+}
 
 function isAfterReport(
   report: Report | null,
@@ -85,6 +90,10 @@ function laterDate(current: Date | null, candidate: Date) {
   return !current || candidate.getTime() > current.getTime()
     ? candidate
     : current
+}
+
+function isAtOrBefore(occurredAt: Date, asOf?: Date) {
+  return !asOf || occurredAt.getTime() <= asOf.getTime()
 }
 
 function createEmptyInventory(): CurrentInventory {
@@ -238,13 +247,15 @@ export function calculateStockEventInventorySnapshots({
 
     inventory[fromLocation] = {
       ...inventory[fromLocation],
-      newCount:
-        inventory[fromLocation].newCount - event.value.tubeCount,
+      newCount: inventory[fromLocation].newCount - event.value.tubeCount,
+      semiCount:
+        inventory[fromLocation].semiCount - event.value.semiTubeCount,
       updatedAt: event.value.transferredAt,
     }
     inventory[toLocation] = {
       ...inventory[toLocation],
       newCount: inventory[toLocation].newCount + event.value.tubeCount,
+      semiCount: inventory[toLocation].semiCount + event.value.semiTubeCount,
       updatedAt: event.value.transferredAt,
     }
     snapshots.transfers.set(event.id, copyInventory(inventory))
@@ -254,13 +265,17 @@ export function calculateStockEventInventorySnapshots({
 }
 
 export async function getCurrentInventory(
-  database: InventoryDatabase = prisma
+  database: InventoryDatabase = prisma,
+  { asOf }: InventoryQueryOptions = {}
 ): Promise<CurrentInventory> {
   const [reports, allocations, transfers] = await Promise.all([
     Promise.all(
       INVENTORY_LOCATIONS.map((location) =>
         database.report.findFirst({
-          where: { location },
+          where: {
+            location,
+            ...(asOf ? { reportedAt: { lte: asOf } } : {}),
+          },
           orderBy: [{ reportedAt: "desc" }, { createdAt: "desc" }],
         })
       )
@@ -275,12 +290,13 @@ export async function getCurrentInventory(
     INVENTORY_LOCATIONS.map((location, index) => {
       const report = reports[index]
       let newCount = report?.newCount ?? 0
-      const semiCount = report?.semiCount ?? 0
+      let semiCount = report?.semiCount ?? 0
       let updatedAt = report?.reportedAt ?? null
 
       for (const allocation of allocations) {
         if (
           allocation.location !== location ||
+          !isAtOrBefore(allocation.purchase.purchasedAt, asOf) ||
           !isAfterReport(
             report,
             allocation.purchase.purchasedAt,
@@ -296,6 +312,7 @@ export async function getCurrentInventory(
 
       for (const transfer of transfers) {
         if (
+          !isAtOrBefore(transfer.transferredAt, asOf) ||
           !isAfterReport(
             report,
             transfer.transferredAt,
@@ -307,11 +324,13 @@ export async function getCurrentInventory(
 
         if (transfer.fromLocation === location) {
           newCount -= transfer.tubeCount
+          semiCount -= transfer.semiTubeCount
           updatedAt = laterDate(updatedAt, transfer.transferredAt)
         }
 
         if (transfer.toLocation === location) {
           newCount += transfer.tubeCount
+          semiCount += transfer.semiTubeCount
           updatedAt = laterDate(updatedAt, transfer.transferredAt)
         }
       }
@@ -321,7 +340,7 @@ export async function getCurrentInventory(
         {
           location,
           newCount: Object.is(newCount, -0) ? 0 : newCount,
-          semiCount,
+          semiCount: Object.is(semiCount, -0) ? 0 : semiCount,
           updatedAt,
         },
       ]
