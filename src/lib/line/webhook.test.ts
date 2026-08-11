@@ -3,6 +3,7 @@ import { ReportSource, type Report } from "@prisma/client"
 import { describe, expect, it, vi } from "vitest"
 import {
   handleLineWebhook,
+  LINE_GROUP_ID_DISCOVERY_VALUE,
   type LineWebhookDependencies,
 } from "./webhook"
 
@@ -224,7 +225,7 @@ function makeDependencies(
     channelSecret: CHANNEL_SECRET,
     allowedGroupId: ALLOWED_GROUP_ID,
     database,
-    logger: { error: vi.fn() },
+    logger: { error: vi.fn(), info: vi.fn() },
     ...makeLineClient(),
     ...overrides,
   }
@@ -274,6 +275,30 @@ describe("handleLineWebhook", () => {
 
     expect(response.status).toBe(401)
     expect($transaction).not.toHaveBeenCalled()
+  })
+
+  it("発見モードでは署名済みイベントのグループIDだけを記録する", async () => {
+    const body = JSON.stringify({ events: [makeMessageEvent()] })
+    const { database, $transaction } = makeDatabase()
+    const { lineClient, replyMessage } = makeLineClient()
+    const logger = { error: vi.fn(), info: vi.fn() }
+
+    const response = await handleLineWebhook(
+      makeRequest(body),
+      makeDependencies(database, {
+        allowedGroupId: LINE_GROUP_ID_DISCOVERY_VALUE,
+        lineClient,
+        logger,
+      })
+    )
+
+    expect(response.status).toBe(200)
+    expect(logger.info).toHaveBeenCalledWith(
+      "LINE group ID discovered",
+      { groupId: ALLOWED_GROUP_ID }
+    )
+    expect($transaction).not.toHaveBeenCalled()
+    expect(replyMessage).not.toHaveBeenCalled()
   })
 
   it("正常登録後に今回値と前回差を返信する", async () => {
@@ -592,7 +617,7 @@ describe("handleLineWebhook", () => {
     const body = JSON.stringify({ events: [makeMessageEvent()] })
     const { database, reports } = makeDatabase()
     const { lineClient } = makeLineClient(replyError)
-    const logger = { error: vi.fn() }
+    const logger = { error: vi.fn(), info: vi.fn() }
 
     const response = await handleLineWebhook(
       makeRequest(body),
@@ -612,7 +637,7 @@ describe("handleLineWebhook", () => {
     const body = JSON.stringify({ events: [makeMessageEvent()] })
     const { database, reports } = makeDatabase({ failReportCreate: true })
     const { lineClient, replyMessage } = makeLineClient()
-    const logger = { error: vi.fn() }
+    const logger = { error: vi.fn(), info: vi.fn() }
 
     const response = await handleLineWebhook(
       makeRequest(body),

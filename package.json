@@ -5,8 +5,12 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "vercel-build": "prisma generate && next build",
     "start": "next start",
+    "postinstall": "prisma generate",
+    "db:migrate:deploy": "prisma migrate deploy",
     "lint": "eslint",
+    "typecheck": "tsc --noEmit --incremental false",
     "test": "vitest run"
   },
   "dependencies": {

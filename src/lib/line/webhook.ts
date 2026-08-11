@@ -16,14 +16,16 @@ import {
 type WebhookDatabase = Pick<PrismaClient, "$transaction">
 type LineReplyClient = Pick<messagingApi.MessagingApiClient, "replyMessage">
 
-type ErrorLogger = Pick<Console, "error">
+type WebhookLogger = Pick<Console, "error" | "info">
+
+export const LINE_GROUP_ID_DISCOVERY_VALUE = "discover"
 
 export type LineWebhookDependencies = {
   channelSecret: string
   allowedGroupId: string
   lineClient: LineReplyClient
   database?: WebhookDatabase
-  logger?: ErrorLogger
+  logger?: WebhookLogger
 }
 
 function parseWebhookBody(rawBody: string): webhook.CallbackRequest | null {
@@ -54,6 +56,21 @@ function getSafeErrorDetails(error: unknown) {
     "code" in error && typeof error.code === "string" ? error.code : undefined
 
   return code ? { name: error.name, code } : { name: error.name }
+}
+
+function logDiscoveredGroupIds(
+  events: webhook.Event[],
+  logger: WebhookLogger
+) {
+  const groupIds = new Set(
+    events.flatMap((event) =>
+      event.source?.type === "group" ? [event.source.groupId] : []
+    )
+  )
+
+  for (const groupId of groupIds) {
+    logger.info("LINE group ID discovered", { groupId })
+  }
 }
 
 async function processEvent(
@@ -165,6 +182,11 @@ export async function handleLineWebhook(
 
   if (!webhookBody) {
     return new Response(null, { status: 400 })
+  }
+
+  if (allowedGroupId === LINE_GROUP_ID_DISCOVERY_VALUE) {
+    logDiscoveredGroupIds(webhookBody.events, logger)
+    return new Response(null, { status: 200 })
   }
 
   try {

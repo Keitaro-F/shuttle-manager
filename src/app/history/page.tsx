@@ -42,6 +42,7 @@ export default async function HistoryPage({searchParams}: Props) {
                     <p>拠点: {report.location}</p>
                     <p>ニュー: {report.newCount}</p>
                     <p>セミ: {report.semiCount}</p>
+                    <p>登録元: {report.source === "LINE" ? "LINE" : "Web"}</p>
                     <p>日時: {report.reportedAt.toLocaleString()}</p>
                     <Link href={`/history/${report.id}/edit`}>
                         <Button variant="outline">編集</Button>
